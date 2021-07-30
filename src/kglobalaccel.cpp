@@ -56,6 +56,7 @@ org::kde::kglobalaccel::Component *KGlobalAccelPrivate::getComponent(const QStri
     // No component no cleaning
     if (!component->isValid()) {
         qCDebug(KGLOBALACCEL_LOG) << "Failed to get component" << componentUnique << QDBusConnection::sessionBus().lastError();
+        delete component;
         return nullptr;
     }
 
