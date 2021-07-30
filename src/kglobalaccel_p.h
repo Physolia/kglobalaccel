@@ -84,6 +84,10 @@ public:
     //! subscribe to signals about changes to the component.
     org::kde::kglobalaccel::Component *getComponent(const QString &componentUnique, bool remember);
 
+    //! Creates as component asynchronously
+    void createComponent(const QString &componentUnique);
+    void addComponent(const QString &componentUnique, org::kde::kglobalaccel::Component *component);
+
     //! Our owner
     KGlobalAccel *q;
 

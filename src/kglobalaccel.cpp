@@ -37,7 +37,7 @@ org::kde::kglobalaccel::Component *KGlobalAccelPrivate::getComponent(const QStri
 
     // Get the path for our component. We have to do that because
     // componentUnique is probably not a valid dbus object path
-    QDBusReply<QDBusObjectPath> reply = iface()->getComponent(componentUnique);
+    QDBusPendingReply<QDBusObjectPath> reply = iface()->getComponent(componentUnique);
     if (!reply.isValid()) {
         if (reply.error().name() == QLatin1String("org.kde.kglobalaccel.NoSuchComponent")) {
             // No problem. The component doesn't exists. That's normal
@@ -61,18 +61,61 @@ org::kde::kglobalaccel::Component *KGlobalAccelPrivate::getComponent(const QStri
     }
 
     if (remember) {
-        // Connect to the signals we are interested in.
-        q->connect(component,
-                   &org::kde::kglobalaccel::Component::globalShortcutPressed,
-                   q,
-                   [this](const QString &componentUnique, const QString &shortcutUnique, qlonglong timestamp) {
-                       _k_invokeAction(componentUnique, shortcutUnique, timestamp);
-                   });
-
-        components[componentUnique] = component;
+        addComponent(componentUnique, component);
     }
 
     return component;
+}
+
+void KGlobalAccelPrivate::createComponent(const QString &componentUnique)
+{
+    // Check if we already have this component
+    if (components.contains(componentUnique)) {
+        return;
+    }
+
+    // Get the path for our component. We have to do that because
+    // componentUnique is probably not a valid dbus object path
+    QDBusPendingReply<QDBusObjectPath> reply = iface()->getComponent(componentUnique);
+    if (!reply.isValid()) {
+        if (reply.error().name() == QLatin1String("org.kde.kglobalaccel.NoSuchComponent")) {
+            // No problem. The component doesn't exist. That's normal
+            return;
+        }
+
+        qCDebug(KGLOBALACCEL_LOG) << "Failed to get dbus path for component " << componentUnique << reply.error();
+        return;
+    }
+
+    QDBusPendingCallWatcher *watcher = new QDBusPendingCallWatcher(reply, q);
+    QObject::connect(watcher, &QDBusPendingCallWatcher::finished, q, [this, reply, watcher, componentUnique] {
+        watcher->deleteLater();
+        if (components.contains(componentUnique)) {
+            // Already created
+            return;
+        }
+
+        auto component = new org::kde::kglobalaccel::Component(QStringLiteral("org.kde.kglobalaccel"), reply.value().path(), QDBusConnection::sessionBus(), q);
+        if (!component->isValid()) {
+            qCDebug(KGLOBALACCEL_LOG) << "Failed to create component" << componentUnique << QDBusConnection::sessionBus().lastError();
+            delete component;
+            return;
+        }
+
+        addComponent(componentUnique, component);
+    });
+}
+
+void KGlobalAccelPrivate::addComponent(const QString &componentUnique, org::kde::kglobalaccel::Component *component)
+{
+    q->connect(component,
+               &org::kde::kglobalaccel::Component::globalShortcutPressed,
+               q,
+               [this](const QString &componentUnique, const QString &shortcutUnique, qlonglong timestamp) {
+                   _k_invokeAction(componentUnique, shortcutUnique, timestamp);
+               });
+
+    components[componentUnique] = component;
 }
 
 namespace
@@ -319,7 +362,7 @@ void KGlobalAccelPrivate::updateGlobalShortcut(/*const would be better*/ QAction
         const auto result = iface()->setShortcut(actionId, intListFromShortcut(activeShortcut), activeSetterFlags);
 
         // Make sure we get informed about changes in the component by kglobalaccel
-        getComponent(componentUniqueForAction(action), true);
+        createComponent(componentUniqueForAction(action));
 
         // Create a shortcut from the result
         const QList<QKeySequence> scResult(shortcutFromIntList(result));
